@@ -90,6 +90,11 @@ def discharge_current_from_Ibar(I_bar_d, Q_m):
     return I_bar_d * E_CHARGE * Q_m / M_XE
 
 
+def Ibar_from_discharge_current(I_d, Q_m):
+    """Inverse of discharge_current_from_Ibar, Eq. (27): I_bar_d = M*I_d/(e*Q_m)."""
+    return I_d * M_XE / (E_CHARGE * Q_m)
+
+
 def _mode_settings(verification_mode):
     """Mode-dependent physics switches and anode boundary conditions."""
     if verification_mode:

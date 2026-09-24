@@ -14,6 +14,7 @@ import io
 import json
 import zipfile
 import hashlib
+import mimetypes
 import pathlib
 from urllib.parse import quote_plus
 
@@ -22,7 +23,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import streamlit as st
 
-from model import ThrusterParams, discharge_current_from_Ibar
+from model import ThrusterParams, discharge_current_from_Ibar, Ibar_from_discharge_current
 from model import solve_model, solve_operating_point, solve_for_Q_m, solve_for_voltage
 
 st.title("HallSim")
@@ -78,8 +79,11 @@ c4.metric("Mass flow rate ṁ",  f"{Q_m*1e6:.2f} mg/s")
 # ============================================================
 VERIFICATION_MODE = st.toggle("Verification Mode")
 
-# Normalised discharge current (paper eq. 27): I_bar_d = M*I_d/(e*Q_m)
-I_bar_d = st.slider("Normalised discharge current Ī_d", 0.9, 1.6, 1.2, 0.05)
+# Normalised discharge current (paper eq. 27): I_bar_d = M*I_d/(e*Q_m).
+# [0.9, 1.6] is the range the underlying model is validated over; results
+# drift from physical for real thrusters outside this band (see operating map below).
+IBAR_D_VALID_RANGE = (0.9, 1.6)
+I_bar_d = st.slider("Normalised discharge current Ī_d", *IBAR_D_VALID_RANGE, 1.2, 0.05)
 I_d = 3.0 if VERIFICATION_MODE else discharge_current_from_Ibar(I_bar_d, Q_m)
 
 params = ThrusterParams(r_1=r_1, r_2=r_2, L_ch=L_ch, Q_m=Q_m, I_d=I_d,
@@ -138,6 +142,14 @@ c8.metric("Exit ion velocity", f"{baseline['v_i'][-1]/1e3:.2f} km/s")
 st.dataframe(plasma_table, hide_index=True, use_container_width=True)
 
 st.subheader("Thrust operating map")
+st.caption(
+    "Thrust as a function of mass flow rate and discharge current, swept independently "
+    "±50% around the selected operating point. The dashed lines mark where the "
+    "normalised discharge current Ī_d leaves the "
+    f"[{IBAR_D_VALID_RANGE[0]}, {IBAR_D_VALID_RANGE[1]}] range the model is validated over "
+    "(see the slider above) — outside that band the model is extrapolating, and the "
+    "discharge voltage it predicts can become unrealistically high or low."
+)
 
 if st.toggle("Run (Q_m, I_d) sweep"):
     Q_m_op, I_d_op = params.Q_m, params.I_d   # the selected operating point
@@ -156,6 +168,10 @@ if st.toggle("Run (Q_m, I_d) sweep"):
             progress.progress((j * n_Q + i + 1) / (n_I * n_Q))
     progress.empty()
 
+    # normalised discharge current at every grid point, to flag where the model is
+    # being extrapolated beyond the range it's actually validated over
+    Ibar_d_grid = Ibar_from_discharge_current(I_d_values[:, None], Q_m_values[None, :])
+
     fig3, ax3 = plt.subplots(figsize=(7, 5.5))
     mesh = ax3.pcolormesh(Q_m_values * 1e6, I_d_values, F_grid,
                           shading='gouraud', cmap='viridis')
@@ -165,6 +181,12 @@ if st.toggle("Run (Q_m, I_d) sweep"):
     cs = ax3.contour(Q_m_values * 1e6, I_d_values, F_grid,
                      colors='white', linewidths=0.8, alpha=0.7)
     ax3.clabel(cs, fmt='%.0f', fontsize=8)
+
+    # boundary of the validated normalised-current range
+    cs_ibar = ax3.contour(Q_m_values * 1e6, I_d_values, Ibar_d_grid,
+                          levels=IBAR_D_VALID_RANGE, colors='red',
+                          linewidths=1.2, linestyles='dashed')
+    ax3.clabel(cs_ibar, fmt=r'$\bar{I}_d$=%.1f', fontsize=8)
 
     # mark the selected thruster's operating point
     ax3.plot(Q_m_op * 1e6, I_d_op, 'wo', mec='black')
@@ -177,38 +199,6 @@ if st.toggle("Run (Q_m, I_d) sweep"):
     ax3.set_title(f'Thrust map — {selected_thruster_name}')
     st.pyplot(fig3)
     plt.close(fig3)
-
-# =============================================================
-# Parameter sweep: thrust vs mass flow rate
-# =============================================================
-st.divider()
-st.subheader("Thrust vs mass flow rate")
-
-if st.toggle("Run Q_m sweep"):   # opt-in: each point is a full ODE solve
-    Q_m_op = params.Q_m                               # thruster's operating point
-    Q_m_values = np.linspace(0.5, 1.5, 21) * Q_m_op   # sweep ±50% around it
-
-    F_values = []
-    progress = st.progress(0.0)
-    for i, q in enumerate(Q_m_values):
-        try:
-            F_values.append(solve_for_Q_m(params, q)["F"] * 1e3)   # [mN]
-        except Exception:
-            F_values.append(np.nan)   # solver failed here; leaves a gap in the line
-        progress.progress((i + 1) / len(Q_m_values))
-    progress.empty()
-
-    fig2, ax2 = plt.subplots(figsize=(7, 4.5))
-    ax2.plot(Q_m_values * 1e6, F_values, 'b-')
-    ax2.plot(Q_m_op * 1e6, baseline["F"] * 1e3, 'bo')
-    ax2.annotate(selected_thruster_name, (Q_m_op * 1e6, baseline["F"] * 1e3),
-                 textcoords="offset points", xytext=(8, -4))
-    ax2.set_xlabel(r'$Q_m$ (mg/s)')
-    ax2.set_ylabel(r'$F$ (mN)')
-    ax2.set_title(f'Thrust vs mass flow rate — {selected_thruster_name}')
-    ax2.grid(True, alpha=0.3)
-    st.pyplot(fig2)
-    plt.close(fig2)
 
 # --- Solver sanity checks, tucked out of the way ---
 with st.expander("Solver checks"):
@@ -365,8 +355,6 @@ np.savez(OUTPUT_DIR / 'numerical_results.npz',
          I_d=baseline['I_d'], V_d=baseline['phi_d'])
 st.write("Saved to 'numerical_results.npz'")
 
-XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-
 def fmt_size(n):
     """1234567 -> '1.2 MB' (decimal units, like Zenodo)."""
     for unit in ("B", "kB", "MB", "GB"):
@@ -378,9 +366,12 @@ def fmt_size(n):
 @st.cache_data                        # read + hash once, not on every rerun
 def load_files(folder: str):
     files = []
-    for p in sorted(pathlib.Path(folder).glob("*.xlsx")):
+    for p in sorted(pathlib.Path(folder).iterdir()):
+        if not p.is_file() or p.suffix.lower() == ".gif":
+            continue
         data = p.read_bytes()
-        files.append(dict(name=p.name, data=data, size=len(data),
+        mime = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
+        files.append(dict(name=p.name, data=data, size=len(data), mime=mime,
                           md5=hashlib.md5(data).hexdigest()))
     return files
 
@@ -392,7 +383,7 @@ def zip_files(folder: str) -> bytes:
             zf.writestr(f["name"], f["data"])
     return buf.getvalue()
 
-files = load_files(str(BASE_DIR))
+files = load_files(str(ASSET_DIR))
 total = sum(f["size"] for f in files)
 
 st.subheader("Files")
@@ -401,19 +392,19 @@ with st.expander(f"Files ({fmt_size(total)})", expanded=True):
     h1, h2, h3 = st.columns([4, 1.5, 1.3], vertical_alignment="center")
     h1.markdown("**Name**")
     h2.markdown("**Size**")
-    h3.download_button("Download all", zip_files(str(BASE_DIR)),
-                       file_name="files.zip", mime="application/zip",
+    h3.download_button("Download all", zip_files(str(ASSET_DIR)),
+                       file_name="assets.zip", mime="application/zip",
                        icon=":material/download:", key="dl_all")
 
     # one row per file
     for f in files:
         st.divider()
         c1, c2, c3 = st.columns([4, 1.5, 1.3], vertical_alignment="center")
-        c1.markdown(f"[{f['name']}](https://zenodo.org/records/<ID>/files/{f['name']})")
+        c1.markdown(f"**{f['name']}**")
         c1.caption(f"md5:{f['md5']}")
         c2.write(fmt_size(f["size"]))
         c3.download_button("Download", f["data"], file_name=f["name"],
-                           mime=XLSX_MIME, icon=":material/download:",
+                           mime=f["mime"], icon=":material/download:",
                            key=f"dl_{f['name']}")   # keys must be unique per button
 
 REFERENCES = [

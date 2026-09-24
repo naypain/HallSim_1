@@ -200,10 +200,10 @@ if st.toggle("Run (Q_m, I_d) sweep"):
     st.pyplot(fig3)
     plt.close(fig3)
 
-# --- Solver sanity checks, tucked out of the way ---
-with st.expander("Solver checks"):
-    st.write(f"G_bar(1) = {baseline['G_bar'][-1]:.4f}")
-    st.write(f"Exit potential = {baseline['phi'][-1]:.3e} V (should be ~0)")
+# # --- Solver sanity checks, tucked out of the way ---
+# with st.expander("Solver checks"):
+#     st.write(f"G_bar(1) = {baseline['G_bar'][-1]:.4f}")
+#     st.write(f"Exit potential = {baseline['phi'][-1]:.3e} V (should be ~0)")
 
 # =============================================================
 # Plot (matches Figure 1 layout)

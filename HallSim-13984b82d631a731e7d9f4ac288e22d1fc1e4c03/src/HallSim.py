@@ -71,8 +71,8 @@ else:
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Inner radius r₁",   f"{r_1*1e3:.1f} mm")
 c2.metric("Outer radius r₂",   f"{r_2*1e3:.1f} mm")
-c3.metric("Channel length L",  f"{L_ch*1e3:.1f} mm")
-c4.metric("Mass flow rate ṁ",  f"{Q_m*1e6:.2f} mg/s")
+c3.metric("Channel length L_ch",  f"{L_ch*1e3:.1f} mm")
+c4.metric("Mass flow rate Qₘ",  f"{Q_m*1e6:.2f} mg/s")
 
 # ============================================================
 # Run configuration
@@ -102,27 +102,28 @@ st.write(f"Mode: {mode_str}")
 # =============================================================
 
 # --- Plasma properties: value + peak location share a structure, so use a table ---
-st.subheader("Plasma properties")
-plasma_table = pd.DataFrame({
-    "Quantity": [
-        "Peak plasma density",
-        "Anode neutral density",
-        "Peak electron temperature",
-        "Peak electric field",
-    ],
-    "Value": [
-        f"{baseline['n'].max():.3e} m⁻³",
-        f"{baseline['n_g'][0]:.3e} m⁻³",
-        f"{baseline['T_e'].max():.2f} eV",
-        f"{baseline['E'].max()/1e3:.2f} kV/m",
-    ],
-    "z/L": [
-        f"{baseline['z_bar'][baseline['n'].argmax()]:.2f}",
-        "0.00",
-        f"{baseline['z_bar'][baseline['T_e'].argmax()]:.2f}",
-        f"{baseline['z_bar'][baseline['E'].argmax()]:.2f}",
-    ],
-})
+with st.expander("Plasma properties"):
+    plasma_table = pd.DataFrame({
+        "Quantity": [
+            "Peak plasma density",
+            "Anode neutral density",
+            "Peak electron temperature",
+            "Peak electric field",
+        ],
+        "Value": [
+            f"{baseline['n'].max():.3e} m⁻³",
+            f"{baseline['n_g'][0]:.3e} m⁻³",
+            f"{baseline['T_e'].max():.2f} eV",
+            f"{baseline['E'].max()/1e3:.2f} kV/m",
+        ],
+        "z/L": [
+            f"{baseline['z_bar'][baseline['n'].argmax()]:.2f}",
+            "0.00",
+            f"{baseline['z_bar'][baseline['T_e'].argmax()]:.2f}",
+            f"{baseline['z_bar'][baseline['E'].argmax()]:.2f}",
+        ],
+    })
+    st.dataframe(plasma_table, hide_index=True, use_container_width=True)
 
 # --- Headline performance metrics ---
 st.divider()
@@ -139,19 +140,17 @@ c6.metric("Propellant utilisation", f"{baseline['utilisation']:.3f}")
 c7.metric("Wall heat flux", f"{baseline['q_ave']/1e3:.2f} kW/m^2")
 c8.metric("Exit ion velocity", f"{baseline['v_i'][-1]/1e3:.2f} km/s")
 
-st.dataframe(plasma_table, hide_index=True, use_container_width=True)
-
 st.subheader("Thrust operating map")
-st.caption(
-    "Thrust as a function of mass flow rate and discharge current, swept independently "
-    "±50% around the selected operating point. The dashed lines mark where the "
-    "normalised discharge current Ī_d leaves the "
-    f"[{IBAR_D_VALID_RANGE[0]}, {IBAR_D_VALID_RANGE[1]}] range the model is validated over "
-    "(see the slider above) — outside that band the model is extrapolating, and the "
-    "discharge voltage it predicts can become unrealistically high or low."
-)
+# st.caption(
+#     "Thrust as a function of mass flow rate and discharge current, swept independently "
+#     "±50% around the selected operating point. The dashed lines mark where the "
+#     "normalised discharge current Ī_d leaves the "
+#     f"[{IBAR_D_VALID_RANGE[0]}, {IBAR_D_VALID_RANGE[1]}] range the model is validated over "
+#     "(see the slider above) — outside that band the model is extrapolating, and the "
+#     "discharge voltage it predicts can become unrealistically high or low."
+# )
 
-if st.toggle("Run (Q_m, I_d) sweep"):
+if st.toggle("Run mass flow rate and discharge current sweep"):
     Q_m_op, I_d_op = params.Q_m, params.I_d   # the selected operating point
     n_Q, n_I = 11, 11                         # 121 full solves — start small
     Q_m_values = np.linspace(0.5, 1.5, n_Q) * Q_m_op
@@ -260,13 +259,13 @@ plt.close(fig)
 # Validation figure: I_d, F, I_sp vs mass flow rate at fixed V_d
 # =============================================================
 st.divider()
-st.subheader("Model validation vs experimental data")
-st.caption(
-    "Discharge current, thrust and anode specific impulse vs. mass flow rate at a fixed "
-    "discharge voltage, compared against the experimental SPT-100 data bundled in "
-    "`assets/experimental_data.xlsx`. The model curve is solved at your currently selected "
-    "geometry; select SPT-100 above for a like-for-like comparison."
-)
+st.subheader("Model validation")
+# st.caption(
+#     "Discharge current, thrust and anode specific impulse vs. mass flow rate at a fixed "
+#     "discharge voltage, compared against the experimental SPT-100 data bundled in "
+#     "`assets/experimental_data.xlsx`. The model curve is solved at your currently selected "
+#     "geometry; select SPT-100 above for a like-for-like comparison."
+# )
 
 if VERIFICATION_MODE:
     st.info("Switch off Verification Mode above to run the full-model validation sweep.")

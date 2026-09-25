@@ -26,13 +26,13 @@ import streamlit as st
 from model import ThrusterParams, discharge_current_from_Ibar, Ibar_from_discharge_current
 from model import solve_model, solve_operating_point, solve_for_Q_m, solve_for_voltage
 
-st.title("HallSim")
-st.write("An Interactive Web Tool for Hall Thruster Simulation and Design.")
-st.image("https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExa3VydWk5NGpoc3h1ODczdm4xb2F5cnB4Z3cyYjgxODU1bjE3azgzZiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/vdZFmH39wHGcVOBgh0/giphy.gif")
-
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 ASSET_DIR = BASE_DIR / "assets"
 OUTPUT_DIR = BASE_DIR / "output"
+
+st.title("HallSim")
+st.write("An Interactive Web Tool for Hall Thruster Simulation and Design.")
+st.image(str(ASSET_DIR / "SPT100_ai_scan_better.gif"))
 
 # ============================================================
 # Thruster geometry selection
@@ -82,9 +82,10 @@ VERIFICATION_MODE = st.toggle("Verification Mode")
 # Normalised discharge current (paper eq. 27): I_bar_d = M*I_d/(e*Q_m).
 # [0.9, 1.6] is the range the underlying model is validated over; results
 # drift from physical for real thrusters outside this band (see operating map below).
-IBAR_D_VALID_RANGE = (0.9, 1.6)
+IBAR_D_VALID_RANGE = (1.1, 1.4)
 I_bar_d = st.slider("Normalised discharge current Ī_d", *IBAR_D_VALID_RANGE, 1.2, 0.05)
 I_d = 3.0 if VERIFICATION_MODE else discharge_current_from_Ibar(I_bar_d, Q_m)
+
 
 params = ThrusterParams(r_1=r_1, r_2=r_2, L_ch=L_ch, Q_m=Q_m, I_d=I_d,
                          verification_mode=VERIFICATION_MODE)
@@ -259,7 +260,7 @@ plt.close(fig)
 # Validation figure: I_d, F, I_sp vs mass flow rate at fixed V_d
 # =============================================================
 st.divider()
-st.subheader("Model validation")
+st.subheader("Model validation for SPT100 and Xenon")
 # st.caption(
 #     "Discharge current, thrust and anode specific impulse vs. mass flow rate at a fixed "
 #     "discharge voltage, compared against the experimental SPT-100 data bundled in "

@@ -87,7 +87,7 @@ propellant = st.selectbox("Propellant", list(PROPELLANTS))
 # Normalised discharge current (paper eq. 27): I_bar_d = M*I_d/(e*Q_m).
 # [0.9, 1.6] is the range the underlying model is validated over; results
 # drift from physical for real thrusters outside this band (see operating map below).
-IBAR_D_VALID_RANGE = (1.1, 1.4)
+IBAR_D_VALID_RANGE = (0.9, 1.6)
 I_bar_d = st.slider("Normalised discharge current Ī_d", *IBAR_D_VALID_RANGE, 1.2, 0.05)
 I_d = 3.0 if VERIFICATION_MODE else discharge_current_from_Ibar(I_bar_d, Q_m, propellant)
 

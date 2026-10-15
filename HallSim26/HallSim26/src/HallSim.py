@@ -26,6 +26,7 @@ import streamlit as st
 from model import ThrusterParams, discharge_current_from_Ibar, Ibar_from_discharge_current
 from model import solve_model, solve_operating_point, solve_for_Q_m, solve_for_voltage
 from model import PROPELLANTS
+from stl_viewer import render_stl_viewer
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 ASSET_DIR = BASE_DIR / "assets"
@@ -33,41 +34,70 @@ OUTPUT_DIR = BASE_DIR / "output"
 
 st.title("HallSim")
 st.write("An Interactive Web Tool for Hall Thruster Simulation and Design.")
-st.image(str(ASSET_DIR / "SPT100_ai_scan_better.gif"))
+# st.image(str(ASSET_DIR / "SPT100_ai_scan_better.gif"))
+
+
+
+
+
+render_stl_viewer(str(ASSET_DIR / 'SPT100.stl'), title="Have this! It's an SPT-100")
+
+
 
 # ============================================================
-# Thruster geometry selection
+# Sidebar: all adjustable model parameters
 # ============================================================
 # thrusters.json: r_1: inner radius [m], r_2: outer radius [m],
 #                 L_ch: channel length [m], Q_m: mass flow rate [kg/s]
 with open(pathlib.Path(__file__).resolve().parent / "thrusters.json") as f:
     THRUSTERS = json.load(f)
 
-selected_thruster_name = st.selectbox(
-    "Select Hall thruster geometry:",
-    [*THRUSTERS, "custom"]
-)
+with st.sidebar:
+    st.header("Configuration")
 
-st.write("### Selected Thruster")
-st.write(f"**{selected_thruster_name}**")
+    selected_thruster_name = st.selectbox(
+        "Select Hall thruster geometry:",
+        [*THRUSTERS, "custom"]
+    )
 
-if selected_thruster_name in THRUSTERS:
-    g = THRUSTERS[selected_thruster_name]
-    r_1, r_2, L_ch, Q_m = g["r_1"], g["r_2"], g["L_ch"], g["Q_m"]
+    if selected_thruster_name in THRUSTERS:
+        g = THRUSTERS[selected_thruster_name]
+        r_1, r_2, L_ch, Q_m = g["r_1"], g["r_2"], g["L_ch"], g["Q_m"]
 
-elif selected_thruster_name == "custom":
-    # sliders work in mm and mg/s (readable), then convert to SI
-    r_1  = st.slider("Inner radius [mm]",     0.0, 100.0, value=35.0) * 1e-3
-    r_2  = st.slider("Outer radius [mm]",     0.0, 100.0, value=50.0) * 1e-3
-    L_ch = st.slider("Channel length [mm]",   0.0, 100.0, value=25.0) * 1e-3
-    Q_m  = st.slider("Mass flow rate [mg/s]", 0.0, 10.0,  value=5.14, step=0.01) * 1e-6
-    if r_1 >= r_2:
-        st.error("Inner radius must be smaller than outer radius")
+    elif selected_thruster_name == "custom":
+        # sliders work in mm and mg/s (readable), then convert to SI
+        r_1  = st.slider("Inner radius [mm]",     0.0, 100.0, value=35.0) * 1e-3
+        r_2  = st.slider("Outer radius [mm]",     0.0, 100.0, value=50.0) * 1e-3
+        L_ch = st.slider("Channel length [mm]",   0.0, 100.0, value=25.0) * 1e-3
+        Q_m  = st.slider("Mass flow rate [mg/s]", 0.0, 10.0,  value=5.14, step=0.01) * 1e-6
+        if r_1 >= r_2:
+            st.error("Inner radius must be smaller than outer radius")
+            st.stop()
+
+    else:
+        st.error(f"Unknown thruster: {selected_thruster_name}")
         st.stop()
 
-else:
-    st.error(f"Unknown thruster: {selected_thruster_name}")
-    st.stop()
+    VERIFICATION_MODE = st.toggle("Verification Mode")
+    propellant = st.selectbox("Propellant", list(PROPELLANTS))
+
+    # Normalised discharge current (paper eq. 27): I_bar_d = M*I_d/(e*Q_m).
+    # [0.9, 1.6] is the range the underlying model is validated over; results
+    # drift from physical for real thrusters outside this band (see operating map below).
+    IBAR_D_VALID_RANGE = (0.9, 1.6)
+    I_bar_d = st.slider("Normalised discharge current Ī_d", *IBAR_D_VALID_RANGE, 1.2, 0.05)
+
+mode_str = "VERIFICATION (Section 3.1)" if VERIFICATION_MODE else "FULL MODEL"
+I_d = 3.0 if VERIFICATION_MODE else discharge_current_from_Ibar(I_bar_d, Q_m, propellant)
+
+params = ThrusterParams(r_1=r_1, r_2=r_2, L_ch=L_ch, Q_m=Q_m, I_d=I_d,
+                         propellant=propellant, verification_mode=VERIFICATION_MODE)
+
+# ============================================================
+# Selected configuration (display only; inputs live in the sidebar)
+# ============================================================
+st.write("### Selected Thruster")
+st.write(f"**{selected_thruster_name}**")
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Inner radius r₁",   f"{r_1*1e3:.1f} mm")
@@ -75,25 +105,7 @@ c2.metric("Outer radius r₂",   f"{r_2*1e3:.1f} mm")
 c3.metric("Channel length L_ch",  f"{L_ch*1e3:.1f} mm")
 c4.metric("Mass flow rate Qₘ",  f"{Q_m*1e6:.2f} mg/s")
 
-# ============================================================
-# Run configuration
-# ============================================================
-VERIFICATION_MODE = st.toggle("Verification Mode")
-mode_str = "VERIFICATION (Section 3.1)" if VERIFICATION_MODE else "FULL MODEL"
 st.write(f"Mode: {mode_str}")
-
-propellant = st.selectbox("Propellant", list(PROPELLANTS))
-
-# Normalised discharge current (paper eq. 27): I_bar_d = M*I_d/(e*Q_m).
-# [0.9, 1.6] is the range the underlying model is validated over; results
-# drift from physical for real thrusters outside this band (see operating map below).
-IBAR_D_VALID_RANGE = (0.9, 1.6)
-I_bar_d = st.slider("Normalised discharge current Ī_d", *IBAR_D_VALID_RANGE, 1.2, 0.05)
-I_d = 3.0 if VERIFICATION_MODE else discharge_current_from_Ibar(I_bar_d, Q_m, propellant)
-
-
-params = ThrusterParams(r_1=r_1, r_2=r_2, L_ch=L_ch, Q_m=Q_m, I_d=I_d,
-                         propellant=propellant, verification_mode=VERIFICATION_MODE)
 
 # =============================================================
 # Run

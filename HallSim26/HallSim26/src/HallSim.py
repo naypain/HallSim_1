@@ -265,7 +265,7 @@ plt.close(fig)
 # Validation figure: I_d, F, I_sp vs mass flow rate at fixed V_d
 # =============================================================
 st.divider()
-st.subheader("Model validation for SPT100 and Xenon")
+st.subheader("Model validation for SPT100")
 # st.caption(
 #     "Discharge current, thrust and anode specific impulse vs. mass flow rate at a fixed "
 #     "discharge voltage, compared against the experimental SPT-100 data bundled in "
@@ -275,9 +275,96 @@ st.subheader("Model validation for SPT100 and Xenon")
 
 if VERIFICATION_MODE:
     st.info("Switch off Verification Mode above to run the full-model validation sweep.")
-elif propellant != "Xenon":
-    st.info(f"Experimental validation data is only available for Xenon "
+elif propellant not in ("Xenon", "Krypton"):
+    st.info(f"Experimental validation data is only available for Xenon and Krypton "
             f"(selected propellant: {propellant}).")
+elif propellant == "Krypton":
+    # Replicates paper Figure 3: I_d, F and I_sp vs discharge voltage at a fixed
+    # mass flow rate. Unlike the Xenon sweep above, I_d is the natural sweep
+    # variable here (the model solves phi_d directly from I_d, no root-find needed).
+    KRYPTON_VALIDATION_DATASETS = {
+        "Krypton, 5.72 mg/s": "Krypton (5.72 mg_s)",
+        "Krypton, 5.31 mg/s": "Krypton (5.31 mg_s)",
+        "Krypton, 4.90 mg/s": "Krypton (4.90 mg_s)",
+        "Krypton, 4.50 mg/s": "Krypton (4.50 mg_s)",
+        "Krypton, 4.09 mg/s": "Krypton (4.09 mg_s)",
+        "Krypton, 3.68 mg/s": "Krypton (3.68 mg_s)",
+        "Krypton, 3.27 mg/s": "Krypton (3.27 mg_s)",
+    }
+    validation_choice = st.selectbox(
+        "Experimental dataset (fixed mass flow rate)",
+        list(KRYPTON_VALIDATION_DATASETS.keys()), index=0,
+    )
+    exp_sheet_name = KRYPTON_VALIDATION_DATASETS[validation_choice]
+
+    exp_data = pd.read_excel(ASSET_DIR / 'experimental_data.xlsx',
+                             sheet_name=exp_sheet_name, header=0)
+    exp_Qm_mg = float(exp_data['Anode  Mass Flow Rate (mg/s)'].iloc[0])
+    exp_phi = exp_data['Discharge Voltage (V)'].to_numpy()
+    exp_Id  = exp_data['Discharge Current (A)'].to_numpy()
+    exp_F   = exp_data['Thrust (mN)'].to_numpy()
+    exp_Isp = (exp_F * 1e-3) / (exp_Qm_mg * 1e-6 * 9.80665)
+
+    n_pts = st.slider(
+        "Sweep resolution (discharge-current points)", 10, 50, 30,
+        help="Each point is a full ODE solve at a fixed discharge current (the mass flow "
+             "rate is fixed to match the experimental dataset) — more points take longer."
+    )
+
+    run_validation = st.toggle(
+        f"Run validation sweep for {validation_choice} "
+        f"(~{n_pts + 1} full model solves, may take up to a minute)"
+    )
+
+    if run_validation:
+        Q_m_fixed = exp_Qm_mg * 1e-6
+        V_max = max(800.0, float(exp_phi.max()) * 1.1)
+
+        try:   # find the I_d that reaches V_max, so the model curve spans the full plot
+            I_d_hi = solve_for_voltage(params, Q_m_fixed, V_max)["I_d"]
+        except Exception:
+            I_d_hi = 11.0
+        I_d_values = np.linspace(0.02, I_d_hi, n_pts)
+
+        model_phi, model_Id, model_F, model_Isp = [], [], [], []
+        progress = st.progress(0.0)
+        for i, i_d in enumerate(I_d_values):
+            try:
+                r = solve_operating_point(params, Q_m_fixed, i_d)
+                model_phi.append(r["phi_d"])
+                model_Id.append(r["I_d"])
+                model_F.append(r["F"] * 1e3)
+                model_Isp.append(r["I_sp"])
+            except Exception:
+                pass   # failed solve at this current: skip it, leave a gap
+            progress.progress((i + 1) / len(I_d_values))
+        progress.empty()
+
+        if len(model_phi) < n_pts:
+            st.warning(f"{n_pts - len(model_phi)} of {n_pts} sweep points did not converge "
+                       "and were skipped.")
+
+        fig5, axs5 = plt.subplots(1, 3, figsize=(13, 4.2))
+
+        panels = [
+            (axs5[0], model_Id,  exp_Id,  r'Discharge Current, $I_d$ (A)'),
+            (axs5[1], model_F,   exp_F,   r'Thrust, $F$ (mN)'),
+            (axs5[2], model_Isp, exp_Isp, r'Anode Specific Impulse, $I_{sp}$ (s)'),
+        ]
+        for ax, model_y, exp_y, ylabel in panels:
+            ax.plot(model_phi, model_y, 'k-', linewidth=1.2, label='Model')
+            ax.plot(exp_phi, exp_y, 's', markerfacecolor='#ffcbcb', markeredgecolor='red',
+                    markeredgewidth=1.2, markersize=8, linestyle='None', label='Experiment')
+            ax.set_xlabel(r'Discharge Voltage, $\phi_d$ (V)')
+            ax.set_ylabel(ylabel)
+            ax.set_xlim(0, 800)
+            ax.set_ylim(bottom=0)
+            ax.legend()
+
+        fig5.suptitle(f'SPT-100 Performance vs Discharge Voltage — {validation_choice} (Krypton)')
+        fig5.tight_layout()
+        st.pyplot(fig5)
+        plt.close(fig5)
 else:
     VALIDATION_DATASETS = {
         "Xenon, 300 V": ("Xenon (300 V)", 300.0),

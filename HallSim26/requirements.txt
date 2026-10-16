@@ -3,4 +3,5 @@ pandas
 matplotlib
 numpy
 streamlit
-stl_from_file
+openpyxl
+streamlit_stl
